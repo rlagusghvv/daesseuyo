@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.7",
+  "Category": "Games",
+  "Description": "Daesseuyo : real BaseBall - Unreal Engine 5 realistic baseball MVP",
+  "Modules": [
+    {
+      "Name": "Daesseuyo",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "EnhancedInput",
+      "Enabled": true
+    }
+  ]
+}

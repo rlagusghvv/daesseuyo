@@ -1,0 +1,19 @@
+# Unreal generated files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+*.sln
+*.xcodeproj/
+*.xcworkspace/
+Content/Characters/
+Content/Mannequins/
+
+# Local platform metadata
+.DS_Store
+index 2.html
+
+# Local service logs
+logs/
