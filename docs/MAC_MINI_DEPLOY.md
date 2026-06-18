@@ -17,7 +17,7 @@
 /bin/zsh <<'EOF'
 set -euo pipefail
 
-REPO_URL="git@github.com:rlagusghvv/daesseuyo.git"
+REPO_URL="https://github.com/rlagusghvv/daesseuyo.git"
 APP_DIR="$HOME/Services/daesseuyo"
 DOMAIN="daesseuyo.splui.com"
 
