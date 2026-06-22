@@ -28,6 +28,7 @@ for file in Content/Daesseuyo/Generated/Videos/*.webm Content/Daesseuyo/Generate
 done
 
 if curl -fsS http://127.0.0.1:4174/health >/dev/null; then
+  curl -fsS "http://127.0.0.1:4174/profile?device=check-web-mvp" >/dev/null
   echo "server health ok"
 else
   echo "server health skipped: start with node multiplayer-server.js"

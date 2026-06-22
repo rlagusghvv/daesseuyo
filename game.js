@@ -86,6 +86,14 @@ const ui = {
   rankRating: document.querySelector("#rankRating"),
   rankDelta: document.querySelector("#rankDelta"),
   rankRecord: document.querySelector("#rankRecord"),
+  entryOverlay: document.querySelector("#entryOverlay"),
+  startAiButton: document.querySelector("#startAiButton"),
+  startRankButton: document.querySelector("#startRankButton"),
+  startMultiButton: document.querySelector("#startMultiButton"),
+  hideEntryButton: document.querySelector("#hideEntryButton"),
+  invitePanel: document.querySelector("#invitePanel"),
+  inviteLink: document.querySelector("#inviteLink"),
+  copyInviteButton: document.querySelector("#copyInviteButton"),
 };
 
 const classes = {
@@ -141,8 +149,9 @@ const targetPositions = {
 };
 
 const params = new URLSearchParams(window.location.search);
-const roomCode = params.get("duel") || "";
-const clientId = getClientId();
+let roomCode = params.get("duel") || "";
+const deviceId = getDeviceId();
+const clientId = `c_${deviceId}`;
 const session = {
   online: false,
   connecting: false,
@@ -150,6 +159,7 @@ const session = {
   role: "local",
   clients: 1,
   locks: { pitch: false, batter: false },
+  roleSlots: { pitcher: false, batter: false, active: 0, graceMs: 45000 },
   matchMode: "casual",
   opponent: "ai",
   lastError: "",
@@ -167,22 +177,26 @@ const aiLevels = {
 let state = engine.freshState();
 let profile = loadRankProfile();
 session.matchMode = profile.mode;
-session.opponent = profile.opponent;
+session.opponent = roomCode ? "multi" : profile.opponent;
 let eventSource = null;
 let aiTimer = 0;
 let autoAdvanceTimer = 0;
 let countdownTimer = 0;
 let motionVideoRequest = 0;
+let serverProfileLoaded = false;
 
-function getClientId() {
-  const random = window.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
-  return `c_${random}_${Date.now().toString(36)}`;
+function getDeviceId() {
+  const existing = localStorage.getItem("daesseuyo-device-id");
+  if (existing) return existing;
+  const random = window.crypto?.randomUUID?.() || `${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+  const id = random.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 60);
+  localStorage.setItem("daesseuyo-device-id", id);
+  return id;
 }
 
 function multiplayerOrigin() {
   if (window.location.protocol === "file:") return "http://127.0.0.1:4174";
-  if (window.location.port === "4174") return window.location.origin;
-  return `${window.location.protocol}//${window.location.hostname || "127.0.0.1"}:4174`;
+  return window.location.origin;
 }
 
 function connectOnline() {
@@ -209,6 +223,7 @@ function connectOnline() {
     session.role = payload.role;
     session.clients = payload.clients;
     session.locks = payload.locks;
+    session.roleSlots = payload.roleSlots || session.roleSlots;
     session.matchMode = payload.mode || profile.mode;
     session.deadlineAt = payload.deadlineAt || 0;
     session.clockSkew = Date.now() - (payload.serverNow || Date.now());
@@ -222,7 +237,11 @@ function connectOnline() {
       session.connecting = false;
       session.lastError = "서버 없음";
       render();
+      return;
     }
+    session.connecting = true;
+    session.lastError = "재연결 중";
+    render();
   };
 }
 
@@ -276,12 +295,79 @@ function setOpponentMode(opponent) {
     render();
     return;
   }
+  if (!roomCode) {
+    roomCode = generateRoomCode();
+    session.room = roomCode;
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("duel", roomCode);
+    window.history.replaceState({}, "", nextUrl);
+    updateInviteLink();
+  }
   session.online = false;
   session.connecting = true;
   session.role = "local";
   session.deadlineAt = 0;
   render();
   connectOnline();
+}
+
+function generateRoomCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let index = 0; index < 6; index += 1) {
+    const random = Math.floor(Math.random() * alphabet.length);
+    code += alphabet[random];
+  }
+  return code;
+}
+
+function inviteUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("duel", roomCode || generateRoomCode());
+  return url.href;
+}
+
+function updateInviteLink() {
+  if (!ui.inviteLink || !ui.invitePanel) return;
+  if (!roomCode) {
+    ui.invitePanel.className = "hidden";
+    return;
+  }
+  ui.invitePanel.className = "rounded-md bg-background p-4";
+  ui.inviteLink.value = inviteUrl();
+}
+
+function hideEntryOverlay() {
+  profile.onboarded = true;
+  saveRankProfile();
+  if (ui.entryOverlay) ui.entryOverlay.className = "hidden";
+}
+
+function showEntryOverlayIfNeeded() {
+  if (!ui.entryOverlay) return;
+  const shouldShow = !roomCode && !profile.onboarded && params.get("play") !== "1";
+  ui.entryOverlay.className = shouldShow
+    ? "fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-4 backdrop-blur-md"
+    : "hidden";
+  updateInviteLink();
+}
+
+function startAiFromEntry(mode = "casual") {
+  profile.onboarded = true;
+  saveRankProfile();
+  setMatchMode(mode);
+  setOpponentMode("ai");
+  hideEntryOverlay();
+}
+
+function startMultiFromEntry() {
+  profile.onboarded = true;
+  saveRankProfile();
+  setMatchMode("casual");
+  setOpponentMode("multi");
+  updateInviteLink();
+  if (ui.startMultiButton) ui.startMultiButton.textContent = "방 생성됨";
+  if (ui.hideEntryButton) ui.hideEntryButton.textContent = "게임 보기";
 }
 
 function setAiLevel(level) {
@@ -316,6 +402,7 @@ function loadRankProfile() {
   try {
     const saved = JSON.parse(localStorage.getItem("daesseuyo-rank-profile") || "{}");
     return {
+      deviceId,
       mode: saved.mode === "ranked" ? "ranked" : "casual",
       opponent: saved.opponent === "multi" ? "multi" : "ai",
       aiLevel: aiLevels[saved.aiLevel] ? saved.aiLevel : "normal",
@@ -325,9 +412,13 @@ function loadRankProfile() {
       streak: Number.isFinite(saved.streak) ? saved.streak : 0,
       lastDelta: Number.isFinite(saved.lastDelta) ? saved.lastDelta : 0,
       lastResultKey: typeof saved.lastResultKey === "string" ? saved.lastResultKey : "",
+      serverUpdatedAt: Number.isFinite(saved.serverUpdatedAt) ? saved.serverUpdatedAt : 0,
+      onboarded: Boolean(saved.onboarded),
+      matches: Array.isArray(saved.matches) ? saved.matches.slice(0, 12) : [],
     };
   } catch {
     return {
+      deviceId,
       mode: "casual",
       opponent: "ai",
       aiLevel: "normal",
@@ -337,6 +428,9 @@ function loadRankProfile() {
       streak: 0,
       lastDelta: 0,
       lastResultKey: "",
+      serverUpdatedAt: 0,
+      onboarded: false,
+      matches: [],
     };
   }
 }
@@ -352,6 +446,7 @@ function applyRankResult() {
 
   const side = session.opponent === "multi" && session.online && session.role === "pitcher" ? "pitcher" : "batter";
   const won = state.winner === side;
+  const ratingBefore = profile.rating;
   const base = won ? 22 : -18;
   const clutch = state.winner === "batter" ? Math.min(6, Math.max(0, state.homeScore - state.awayScore + 2)) : 0;
   const delta = won ? base + clutch : base - (state.stats.reads > 0 ? 2 : 0);
@@ -362,7 +457,77 @@ function applyRankResult() {
   profile.streak = won ? Math.max(1, profile.streak + 1) : Math.min(-1, profile.streak - 1);
   profile.lastDelta = delta;
   profile.lastResultKey = resultKey;
+  profile.matches = [
+    {
+      at: Date.now(),
+      won,
+      delta,
+      rating: profile.rating,
+      mode: session.matchMode,
+      opponent: session.opponent,
+      role: side,
+      score: `${state.awayScore}-${state.homeScore}`,
+      pitches: state.stats.total,
+    },
+    ...profile.matches,
+  ].slice(0, 12);
   saveRankProfile();
+  syncRecordResult({ won, delta, side, resultKey, ratingBefore });
+}
+
+async function syncServerProfile() {
+  if (serverProfileLoaded || window.location.protocol === "file:") return;
+  serverProfileLoaded = true;
+  try {
+    const response = await fetch(`${multiplayerOrigin()}/profile?device=${encodeURIComponent(deviceId)}`);
+    if (!response.ok) return;
+    const payload = await response.json();
+    const server = payload.profile;
+    if (!server || !Number.isFinite(server.updatedAt) || server.updatedAt <= profile.serverUpdatedAt) return;
+    profile.rating = Number.isFinite(server.rating) ? server.rating : profile.rating;
+    profile.wins = Number.isFinite(server.wins) ? server.wins : profile.wins;
+    profile.losses = Number.isFinite(server.losses) ? server.losses : profile.losses;
+    profile.streak = Number.isFinite(server.streak) ? server.streak : profile.streak;
+    profile.lastDelta = Number.isFinite(server.lastDelta) ? server.lastDelta : profile.lastDelta;
+    profile.matches = Array.isArray(server.matches) ? server.matches.slice(0, 12) : profile.matches;
+    profile.serverUpdatedAt = server.updatedAt;
+    saveRankProfile();
+    render();
+  } catch {
+    serverProfileLoaded = false;
+  }
+}
+
+async function syncRecordResult({ won, delta, side, resultKey, ratingBefore }) {
+  if (window.location.protocol === "file:") return;
+  try {
+    const response = await fetch(`${multiplayerOrigin()}/record`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deviceId,
+        resultKey,
+        won,
+        delta,
+        ratingBefore,
+        wins: profile.wins - (won ? 1 : 0),
+        losses: profile.losses - (won ? 0 : 1),
+        streak: won ? Math.max(0, profile.streak - 1) : Math.min(0, profile.streak + 1),
+        mode: session.matchMode,
+        opponent: session.opponent,
+        role: side,
+        score: `${state.awayScore}-${state.homeScore}`,
+        pitches: state.stats.total,
+      }),
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (!payload.profile) return;
+    profile.serverUpdatedAt = payload.profile.updatedAt || Date.now();
+    saveRankProfile();
+  } catch {
+    // Local result remains saved even when the server write is temporarily unavailable.
+  }
 }
 
 function closeOnline() {
@@ -447,7 +612,10 @@ function scoreboardInning() {
 function modeText() {
   const mode = session.matchMode === "ranked" ? "랭크" : "친선";
   if (session.opponent === "ai") return `${mode} · AI ${aiLevels[profile.aiLevel].label}`;
-  if (session.online) return `${mode} · ${session.room} · ${roleName(session.role)} · ${session.clients}/2`;
+  if (session.online) {
+    const status = session.connecting ? "재연결" : `${session.roleSlots.active || session.clients}/2`;
+    return `${mode} · ${session.room} · ${roleName(session.role)} · ${status}`;
+  }
   if (session.connecting) return "멀티 연결중";
   if (session.lastError) return "로컬 2인 · 서버 없음";
   return `${mode} · 로컬 2인`;
@@ -967,6 +1135,8 @@ function batterHintText() {
 
 function readyText() {
   if (!session.online) return "연결을 기다립니다.";
+  if (session.connecting) return "재연결 중입니다.";
+  if (session.roleSlots.active < 2) return "친구 입장을 기다립니다.";
   if (session.role === "pitcher" && session.locks.pitch) return "내 투구 선택 완료. 타자를 기다립니다.";
   if (session.role === "batter" && session.locks.batter) return "내 선택 완료. 투수를 기다립니다.";
   if (session.role === "observer") return "관전 중입니다.";
@@ -1254,6 +1424,32 @@ ui.opponentButtons.forEach((button) => {
 ui.aiButtons.forEach((button) => {
   button.addEventListener("click", () => setAiLevel(button.dataset.aiLevel));
 });
+if (ui.startAiButton) {
+  ui.startAiButton.addEventListener("click", () => startAiFromEntry("casual"));
+}
+if (ui.startRankButton) {
+  ui.startRankButton.addEventListener("click", () => startAiFromEntry("ranked"));
+}
+if (ui.startMultiButton) {
+  ui.startMultiButton.addEventListener("click", startMultiFromEntry);
+}
+if (ui.hideEntryButton) {
+  ui.hideEntryButton.addEventListener("click", hideEntryOverlay);
+}
+if (ui.copyInviteButton) {
+  ui.copyInviteButton.addEventListener("click", async () => {
+    updateInviteLink();
+    try {
+      await navigator.clipboard.writeText(ui.inviteLink.value);
+      ui.copyInviteButton.textContent = "완료";
+      window.setTimeout(() => {
+        ui.copyInviteButton.textContent = "복사";
+      }, 1200);
+    } catch {
+      ui.inviteLink.select();
+    }
+  });
+}
 
 window.addEventListener("keydown", (event) => {
   const map = { q: "zone", w: "chase", e: "inside", r: "offspeed" };
@@ -1268,5 +1464,7 @@ window.addEventListener("keydown", (event) => {
   }
 });
 
+showEntryOverlayIfNeeded();
+syncServerProfile();
 render();
 if (session.opponent === "multi") connectOnline();

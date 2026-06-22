@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
-HOST="${HOST:-127.0.0.1}"
+BIND_HOST="${BIND_HOST:-127.0.0.1}"
 PORT="${PORT:-4174}"
 LABEL="${LABEL:-com.daesseuyo.web}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -22,7 +22,7 @@ cat > "$PLIST" <<PLIST
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>export PATH="$NODE_PATH_PREFIX"; cd "$APP_DIR" &amp;&amp; HOST="$HOST" PORT="$PORT" node multiplayer-server.js</string>
+    <string>export PATH="$NODE_PATH_PREFIX"; cd "$APP_DIR" &amp;&amp; BIND_HOST="$BIND_HOST" PORT="$PORT" node multiplayer-server.js</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -46,4 +46,4 @@ echo "daesseuyo launchd service installed"
 echo "label: $LABEL"
 echo "plist: $PLIST"
 echo "app: $APP_DIR"
-echo "url: http://$HOST:$PORT/"
+echo "url: http://$BIND_HOST:$PORT/"

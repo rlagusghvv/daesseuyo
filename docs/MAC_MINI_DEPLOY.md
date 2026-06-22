@@ -20,6 +20,7 @@ set -euo pipefail
 REPO_URL="https://github.com/rlagusghvv/daesseuyo.git"
 APP_DIR="$HOME/Services/daesseuyo"
 DOMAIN="daesseuyo.splui.com"
+BIND_HOST="127.0.0.1"
 
 command -v brew >/dev/null 2>&1 || { echo "Homebrew가 없습니다: https://brew.sh"; exit 1; }
 brew list git >/dev/null 2>&1 || brew install git
@@ -35,16 +36,18 @@ fi
 
 cd "$APP_DIR"
 chmod +x scripts/*.sh
-DOMAIN="$DOMAIN" scripts/deploy_daesseuyo_macmini.sh
+BIND_HOST="$BIND_HOST" DOMAIN="$DOMAIN" scripts/deploy_daesseuyo_macmini.sh
 EOF
 ```
 
 위 명령이 끝나면 서버 앱은 `127.0.0.1:4174`에서 계속 실행되고, 공개 주소는 `https://daesseuyo.splui.com`이다.
 
+cloudflared를 쓰는 서버라면 `daesseuyo.splui.com` ingress는 반드시 `service: http_status:404` catch-all 규칙보다 위에 있어야 한다. 배포 스크립트는 이 순서로 자동 삽입한다.
+
 ## 확인
 
 ```bash
-HOST=127.0.0.1 PORT=4174 scripts/status_daesseuyo_launch_agent.sh
+BIND_HOST=127.0.0.1 PORT=4174 scripts/status_daesseuyo_launch_agent.sh
 tail -f logs/daesseuyo.launchd.out.log
 tail -f logs/daesseuyo.launchd.err.log
 ```

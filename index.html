@@ -244,6 +244,21 @@
               <span class="truncate text-xs text-muted-foreground">최근 승부</span>
               <strong id="duelCount" class="text-sm">0</strong>
             </div>
+            <div class="mt-2 hidden grid-cols-3 gap-2 md:grid" aria-label="랭크 전적">
+              <div class="rounded-md bg-background p-2">
+                <span class="block truncate text-xs text-muted-foreground">랭크</span>
+                <strong id="rankTier" class="block truncate text-sm">브론즈</strong>
+              </div>
+              <div class="rounded-md bg-background p-2">
+                <span class="block truncate text-xs text-muted-foreground">점수</span>
+                <strong id="rankRating" class="block truncate text-sm">1000</strong>
+              </div>
+              <div class="rounded-md bg-background p-2">
+                <span class="block truncate text-xs text-muted-foreground">변동</span>
+                <em id="rankDelta" class="not-italic text-sm text-muted-foreground">±0</em>
+              </div>
+            </div>
+            <p id="rankRecord" class="mt-2 hidden truncate text-xs text-muted-foreground md:block">0승 0패</p>
             <p id="historySummary" class="mt-1 truncate text-xs text-muted-foreground md:hidden">기록 없음</p>
             <div id="historyList" class="mt-4 hidden gap-2 md:grid"></div>
             <button id="resetButton" class="hidden w-full rounded-md bg-muted p-2 text-sm text-foreground md:mt-4 md:block" type="button">경기 리셋</button>
@@ -253,7 +268,40 @@
 
     </main>
 
-    <script src="./shared-engine.js?v=design-system-26"></script>
-    <script src="./game.js?v=design-system-26"></script>
+    <section id="entryOverlay" class="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-4 backdrop-blur-md" aria-label="게임 시작">
+      <div class="grid w-full max-w-xl gap-4 rounded-md border border-border bg-card p-4">
+        <div class="grid gap-2">
+          <span class="text-xs font-semibold text-muted-foreground">대쓰요: real BaseBall</span>
+          <h1 class="text-2xl font-semibold leading-none">9회말 2아웃, 한 수 싸움</h1>
+          <p class="text-sm text-muted-foreground">투수는 공을 숨기고, 타자는 읽는다. Q/W/E/R 중 하나만 고르면 바로 승부가 난다.</p>
+        </div>
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <button id="startAiButton" class="rounded-md bg-primary p-4 text-sm font-semibold text-primary-foreground" type="button">AI 대전</button>
+          <button id="startRankButton" class="rounded-md bg-muted p-4 text-sm font-semibold text-foreground" type="button">랭크 테스트</button>
+          <button id="startMultiButton" class="rounded-md bg-muted p-4 text-sm font-semibold text-foreground" type="button">친구랑 하기</button>
+        </div>
+        <div class="grid gap-2 rounded-md bg-background p-4">
+          <div class="flex items-center justify-between gap-2">
+            <strong class="text-sm">10초 규칙</strong>
+            <button id="hideEntryButton" class="rounded-md bg-muted px-4 py-2 text-xs text-foreground" type="button">바로 보기</button>
+          </div>
+          <div id="tutorialPanel" class="grid gap-2 text-sm text-muted-foreground">
+            <p>타자: 들어올 공을 고른다. W는 치지 않고 골라내기.</p>
+            <p>투수: 타자가 못 맞힐 공을 고른다. 좋은 공도 실투가 날 수 있다.</p>
+            <p>맞히면 좋은 타구 확률이 오르고, 빗나가면 투수가 유리하다.</p>
+          </div>
+        </div>
+        <div id="invitePanel" class="hidden rounded-md bg-background p-4">
+          <span class="block text-xs text-muted-foreground">친구 초대 링크</span>
+          <div class="mt-2 flex gap-2">
+            <input id="inviteLink" class="min-w-0 flex-1 rounded-md border border-border bg-card p-2 text-xs text-foreground" readonly />
+            <button id="copyInviteButton" class="rounded-md bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground" type="button">복사</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <script src="./shared-engine.js?v=design-system-27"></script>
+    <script src="./game.js?v=design-system-27"></script>
   </body>
 </html>

@@ -8,13 +8,17 @@ const engine = require("./shared-engine.js");
 
 const rootDir = __dirname;
 const port = Number(process.env.PORT || 4174);
-const host = process.env.HOST || "127.0.0.1";
+const bindHost = process.env.BIND_HOST || process.env.HOST || "127.0.0.1";
+const dataDir = path.join(rootDir, ".data");
+const recordsFile = path.join(dataDir, "rank-records.json");
 const rooms = new Map();
 const MULTI_PICK_MS = 7000;
 const REVEAL_MS = 3800;
 const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 10 * 60 * 1000);
 const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS || 15000);
 const CLEANUP_MS = Number(process.env.CLEANUP_MS || 30000);
+const ROLE_GRACE_MS = Number(process.env.ROLE_GRACE_MS || 45 * 1000);
+const records = loadRecords();
 
 function getRoom(roomId) {
   const id = sanitizeRoom(roomId);
@@ -53,6 +57,7 @@ function touchRoom(room) {
 }
 
 function assignRole(room, clientId) {
+  pruneDisconnectedRoles(room);
   if (room.roles.pitcher === clientId) return "pitcher";
   if (room.roles.batter === clientId) return "batter";
   if (!room.roles.pitcher) {
@@ -68,6 +73,28 @@ function assignRole(room, clientId) {
 
 function clientCount(room) {
   return [...room.clients.values()].filter((client) => client.connections.size > 0).length;
+}
+
+function activeRoleCount(room) {
+  return ["pitcher", "batter"].filter((role) => {
+    const clientId = room.roles[role];
+    if (!clientId) return false;
+    const client = room.clients.get(clientId);
+    return client && client.connections.size > 0;
+  }).length;
+}
+
+function pruneDisconnectedRoles(room) {
+  const now = Date.now();
+  for (const role of ["pitcher", "batter"]) {
+    const clientId = room.roles[role];
+    if (!clientId) continue;
+    const client = room.clients.get(clientId);
+    if (!client || (client.connections.size === 0 && now - client.disconnectedAt > ROLE_GRACE_MS)) {
+      room.roles[role] = "";
+      if (client && client.connections.size === 0) room.clients.delete(clientId);
+    }
+  }
 }
 
 function publicPayload(room, clientId, message = "") {
@@ -92,6 +119,12 @@ function publicPayload(room, clientId, message = "") {
     locks: {
       pitch: Boolean(room.state.pitchChoice),
       batter: Boolean(room.state.batterChoice),
+    },
+    roleSlots: {
+      pitcher: Boolean(room.roles.pitcher),
+      batter: Boolean(room.roles.batter),
+      active: activeRoleCount(room),
+      graceMs: ROLE_GRACE_MS,
     },
     state,
     message,
@@ -174,9 +207,10 @@ function handleEvents(req, res, url) {
 
   assignRole(room, clientId);
   if (!room.clients.has(clientId)) {
-    room.clients.set(clientId, { connections: new Set() });
+    room.clients.set(clientId, { connections: new Set(), disconnectedAt: 0 });
   }
   const client = room.clients.get(clientId);
+  client.disconnectedAt = 0;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -197,9 +231,7 @@ function handleEvents(req, res, url) {
     clearInterval(heartbeat);
     client.connections.delete(res);
     if (client.connections.size === 0) {
-      room.clients.delete(clientId);
-      if (room.roles.pitcher === clientId) room.roles.pitcher = "";
-      if (room.roles.batter === clientId) room.roles.batter = "";
+      client.disconnectedAt = Date.now();
       if (room.clients.size > 0) broadcast(room);
       else touchRoom(room);
     }
@@ -208,6 +240,12 @@ function handleEvents(req, res, url) {
 
 async function handleAction(req, res, url) {
   const body = await readBody(req);
+  if (url.pathname === "/record") {
+    const result = saveRecord(body);
+    writeJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
+
   const clientId = sanitizeClient(body.clientId);
   if (!clientId) {
     writeJson(res, 400, { ok: false, error: "missing client id" });
@@ -276,6 +314,15 @@ async function handleAction(req, res, url) {
   writeJson(res, 404, { error: "not found" });
 }
 
+function handleProfile(req, res, url) {
+  const deviceId = sanitizeDevice(url.searchParams.get("device"));
+  if (!deviceId) {
+    writeJson(res, 400, { ok: false, error: "missing device" });
+    return;
+  }
+  writeJson(res, 200, { ok: true, profile: getRecordProfile(deviceId) });
+}
+
 function validMode(value) {
   if (value === "ranked") return "ranked";
   if (value === "casual") return "casual";
@@ -324,7 +371,8 @@ function serveStatic(req, res, url) {
 function cleanupRooms() {
   const now = Date.now();
   for (const [id, room] of rooms) {
-    if (room.clients.size > 0) continue;
+    pruneDisconnectedRoles(room);
+    if (clientCount(room) > 0) continue;
     if (now - room.updatedAt < ROOM_TTL_MS) continue;
     clearTimeout(room.roundTimer);
     clearTimeout(room.advanceTimer);
@@ -337,12 +385,111 @@ function roomSummaries() {
   return [...rooms.values()].map((room) => ({
     id: room.id,
     clients: clientCount(room),
+    roleSlots: {
+      pitcher: Boolean(room.roles.pitcher),
+      batter: Boolean(room.roles.batter),
+      active: activeRoleCount(room),
+    },
     phase: room.state.phase,
     gameOver: room.state.gameOver,
     mode: room.mode,
     ageMs: Date.now() - room.createdAt,
     idleMs: Date.now() - room.updatedAt,
   }));
+}
+
+function loadRecords() {
+  try {
+    return JSON.parse(fs.readFileSync(recordsFile, "utf8"));
+  } catch {
+    return { clients: {} };
+  }
+}
+
+function saveRecords() {
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(recordsFile, JSON.stringify(records, null, 2));
+}
+
+function sanitizeDevice(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
+}
+
+function defaultRecord() {
+  return {
+    rating: 1000,
+    wins: 0,
+    losses: 0,
+    streak: 0,
+    lastDelta: 0,
+    matches: [],
+    resultKeys: [],
+    updatedAt: 0,
+  };
+}
+
+function getRecordProfile(deviceId) {
+  const existing = records.clients[deviceId] || defaultRecord();
+  return {
+    rating: existing.rating,
+    wins: existing.wins,
+    losses: existing.losses,
+    streak: existing.streak,
+    lastDelta: existing.lastDelta,
+    matches: existing.matches.slice(0, 12),
+    updatedAt: existing.updatedAt,
+  };
+}
+
+function saveRecord(body) {
+  const deviceId = sanitizeDevice(body.deviceId);
+  const resultKey = String(body.resultKey || "").slice(0, 160);
+  if (!deviceId || !resultKey) return { ok: false, error: "invalid record" };
+
+  const record = records.clients[deviceId] || {
+    ...defaultRecord(),
+    rating: clampNumber(body.ratingBefore ?? body.rating, 600, 2400, 1000),
+    wins: clampNumber(body.wins, 0, 100000, 0),
+    losses: clampNumber(body.losses, 0, 100000, 0),
+    streak: clampNumber(body.streak, -100000, 100000, 0),
+  };
+
+  if (record.resultKeys.includes(resultKey)) {
+    records.clients[deviceId] = record;
+    return { ok: true, duplicate: true, profile: getRecordProfile(deviceId) };
+  }
+
+  const won = Boolean(body.won);
+  const delta = clampNumber(body.delta, -60, 60, won ? 20 : -18);
+  record.rating = Math.max(600, record.rating + delta);
+  record.wins += won ? 1 : 0;
+  record.losses += won ? 0 : 1;
+  record.streak = won ? Math.max(1, record.streak + 1) : Math.min(-1, record.streak - 1);
+  record.lastDelta = delta;
+  record.updatedAt = Date.now();
+  record.resultKeys.unshift(resultKey);
+  record.resultKeys = record.resultKeys.slice(0, 80);
+  record.matches.unshift({
+    at: record.updatedAt,
+    won,
+    delta,
+    rating: record.rating,
+    mode: String(body.mode || "ranked").slice(0, 20),
+    opponent: String(body.opponent || "ai").slice(0, 20),
+    role: String(body.role || "batter").slice(0, 20),
+    score: String(body.score || "").slice(0, 20),
+    pitches: clampNumber(body.pitches, 0, 99, 0),
+  });
+  record.matches = record.matches.slice(0, 20);
+  records.clients[deviceId] = record;
+  saveRecords();
+  return { ok: true, profile: getRecordProfile(deviceId) };
+}
+
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(number)));
 }
 
 function contentType(filePath) {
@@ -389,11 +536,15 @@ const server = http.createServer((req, res) => {
     writeJson(res, 200, { rooms: roomSummaries() });
     return;
   }
+  if (req.method === "GET" && url.pathname === "/profile") {
+    handleProfile(req, res, url);
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/events") {
     handleEvents(req, res, url);
     return;
   }
-  if (req.method === "POST" && ["/choose", "/next", "/reset", "/mode"].includes(url.pathname)) {
+  if (req.method === "POST" && ["/choose", "/next", "/reset", "/mode", "/record"].includes(url.pathname)) {
     handleAction(req, res, url);
     return;
   }
@@ -404,8 +555,8 @@ const server = http.createServer((req, res) => {
   writeJson(res, 405, { error: "method not allowed" });
 });
 
-server.listen(port, host, () => {
-  console.log(`Daesseuyo multiplayer server: http://127.0.0.1:${port}/?duel=TG7ZS8`);
+server.listen(port, bindHost, () => {
+  console.log(`Daesseuyo multiplayer server: http://${bindHost}:${port}/?duel=TG7ZS8`);
 });
 
 const cleanupTimer = setInterval(cleanupRooms, CLEANUP_MS);

@@ -3,7 +3,7 @@ set -euo pipefail
 setopt NULL_GLOB
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-HOST="${HOST:-127.0.0.1}"
+BIND_HOST="${BIND_HOST:-127.0.0.1}"
 PORT="${PORT:-4174}"
 SUBDOMAIN="${SUBDOMAIN:-daesseuyo}"
 ROOT_DOMAIN="${ROOT_DOMAIN:-splui.com}"
@@ -116,7 +116,7 @@ configure_cloudflared() {
 
   cp "$config" "$config.bak.$(date +%Y%m%d%H%M%S)"
   if ! grep -q "hostname:[[:space:]]*$domain" "$config"; then
-    awk -v domain="$domain" -v service="http://'"$HOST:$PORT"'" '
+    awk -v domain="$domain" -v service="http://'"$BIND_HOST:$PORT"'" '
       !added && $0 ~ /^[[:space:]]*service:[[:space:]]*http_status:404/ {
         print "  - hostname: " domain
         print "    service: " service
@@ -139,7 +139,7 @@ configure_cloudflared() {
     launchctl kickstart -k "gui/$(id -u)/com.cloudflare.cloudflared" 2>/dev/null || true
   fi
 
-  echo "cloudflared configured: $domain -> http://$HOST:$PORT"
+  echo "cloudflared configured: $domain -> http://$BIND_HOST:$PORT"
   return 0
 }
 
@@ -161,13 +161,13 @@ configure_caddy() {
 
 $domain {
     encode zstd gzip
-    reverse_proxy $HOST:$PORT
+    reverse_proxy $BIND_HOST:$PORT
 }
 CADDY
   fi
   caddy validate --config "$caddyfile"
   brew services restart caddy 2>/dev/null || caddy reload --config "$caddyfile"
-  echo "caddy configured: $domain -> http://$HOST:$PORT"
+  echo "caddy configured: $domain -> http://$BIND_HOST:$PORT"
   return 0
 }
 
@@ -185,7 +185,7 @@ server {
     server_name $domain;
 
     location / {
-        proxy_pass http://$HOST:$PORT;
+        proxy_pass http://$BIND_HOST:$PORT;
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -199,7 +199,7 @@ NGINX
 
   nginx -t
   brew services restart nginx 2>/dev/null || nginx -s reload
-  echo "nginx configured: $domain -> http://$HOST:$PORT"
+  echo "nginx configured: $domain -> http://$BIND_HOST:$PORT"
   return 0
 }
 
@@ -221,13 +221,13 @@ else
   echo "ffmpeg가 없어 영상 디코드 체크는 건너뜁니다. 필요하면 brew install ffmpeg 하세요."
 fi
 
-APP_DIR="$ROOT_DIR" HOST="$HOST" PORT="$PORT" scripts/install_daesseuyo_launch_agent.sh
+APP_DIR="$ROOT_DIR" BIND_HOST="$BIND_HOST" PORT="$PORT" scripts/install_daesseuyo_launch_agent.sh
 sleep 2
-curl -fsS "http://$HOST:$PORT/health"
+curl -fsS "http://$BIND_HOST:$PORT/health"
 echo
 
 if [[ -z "$DOMAIN" ]]; then
-  echo "앱 실행 완료: http://$HOST:$PORT"
+  echo "앱 실행 완료: http://$BIND_HOST:$PORT"
   echo "도메인을 정하지 못했습니다. DOMAIN=daesseuyo.splui.com 으로 다시 실행하세요." >&2
   exit 1
 fi
@@ -239,8 +239,8 @@ elif configure_caddy "$DOMAIN"; then
 elif configure_nginx "$DOMAIN"; then
   :
 else
-  echo "앱 실행 완료: http://$HOST:$PORT"
-  echo "기존 cloudflared/Caddy/Nginx 설정을 찾지 못했습니다. $DOMAIN -> http://$HOST:$PORT 로 직접 연결하세요." >&2
+  echo "앱 실행 완료: http://$BIND_HOST:$PORT"
+  echo "기존 cloudflared/Caddy/Nginx 설정을 찾지 못했습니다. $DOMAIN -> http://$BIND_HOST:$PORT 로 직접 연결하세요." >&2
   exit 1
 fi
 
