@@ -327,18 +327,18 @@ async function handleMetrics(req, res) {
   writeJson(res, result.ok ? 200 : 400, result);
 }
 
-function handleProfile(req, res, url) {
+function handleProfile(req, res, url, headOnly = false) {
   const deviceId = sanitizeDevice(url.searchParams.get("device"));
   if (!deviceId) {
-    writeJson(res, 400, { ok: false, error: "missing device" });
+    writeJson(res, 400, { ok: false, error: "missing device" }, headOnly);
     return;
   }
-  writeJson(res, 200, { ok: true, profile: getRecordProfile(deviceId) });
+  writeJson(res, 200, { ok: true, profile: getRecordProfile(deviceId) }, headOnly);
 }
 
-function handleDaily(req, res, url) {
+function handleDaily(req, res, url, headOnly = false) {
   const date = sanitizeDailyKey(url.searchParams.get("date") || todayKey());
-  writeJson(res, 200, { ok: true, date, board: dailyBoard(date) });
+  writeJson(res, 200, { ok: true, date, board: dailyBoard(date) }, headOnly);
 }
 
 function handleShareCard(req, res, url) {
@@ -795,16 +795,16 @@ const server = http.createServer((req, res) => {
     writeJson(res, 200, { rooms: roomSummaries() }, req.method === "HEAD");
     return;
   }
-  if (req.method === "GET" && url.pathname === "/profile") {
-    handleProfile(req, res, url);
+  if (isRead && url.pathname === "/profile") {
+    handleProfile(req, res, url, req.method === "HEAD");
     return;
   }
-  if (req.method === "GET" && url.pathname === "/daily") {
-    handleDaily(req, res, url);
+  if (isRead && url.pathname === "/daily") {
+    handleDaily(req, res, url, req.method === "HEAD");
     return;
   }
-  if (req.method === "GET" && url.pathname === "/traffic") {
-    writeJson(res, 200, trafficSummary());
+  if (isRead && url.pathname === "/traffic") {
+    writeJson(res, 200, trafficSummary(), req.method === "HEAD");
     return;
   }
   if (isRead && url.pathname === "/share-card.svg") {

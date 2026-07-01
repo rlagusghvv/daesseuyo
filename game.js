@@ -152,6 +152,13 @@ const targetPositions = {
   default: "left-1/2 top-1/2",
 };
 
+const postGameActions = [
+  { action: "retry", title: "Q 다시", help: "한 판 더" },
+  { action: "share", title: "W 공유", help: "결과 보내기" },
+  { action: "invite", title: "E 초대", help: "친구랑 하기" },
+  { action: "daily", title: "R 오늘", help: "기록 도전" },
+];
+
 const params = new URLSearchParams(window.location.search);
 let roomCode = params.get("duel") || "";
 const deviceId = getDeviceId();
@@ -1181,6 +1188,16 @@ function multiTimeText() {
 function renderKeys() {
   const disabled = !canChoose();
   [...ui.keyPad.querySelectorAll("button")].forEach((button) => {
+    if (state.gameOver) {
+      const action = postGameActions[buttonIndex(button)];
+      button.dataset.endAction = action.action;
+      button.className = action.action === "share" ? classes.keyButtonActive : classes.keyButton;
+      button.disabled = false;
+      button.querySelector("strong").textContent = action.title;
+      button.querySelector("span").textContent = action.help;
+      return;
+    }
+    delete button.dataset.endAction;
     const key = button.dataset.key;
     const active = session.opponent === "ai" && state.phase === "bat" && state.batterChoice === key;
     button.className = active ? classes.keyButtonActive : classes.keyButton;
@@ -1189,6 +1206,10 @@ function renderKeys() {
     button.querySelector("strong").textContent = keyTitleText(key, usePitchText);
     button.querySelector("span").textContent = keyHelpText(key, usePitchText);
   });
+}
+
+function buttonIndex(button) {
+  return [...ui.keyPad.querySelectorAll("button")].indexOf(button);
 }
 
 function keyTitleText(key, usePitchText) {
@@ -1630,8 +1651,51 @@ function statSegments(pct) {
 ui.keyPad.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-key]");
   if (!button) return;
+  if (state.gameOver && button.dataset.endAction) {
+    handlePostGameAction(button.dataset.endAction);
+    return;
+  }
   chooseKey(button.dataset.key);
 });
+
+function handlePostGameAction(action) {
+  if (action === "retry") {
+    trackRetry();
+    resetGame();
+    return;
+  }
+  if (action === "share") {
+    shareResult();
+    return;
+  }
+  if (action === "invite") {
+    createAndCopyInvite();
+    return;
+  }
+  if (action === "daily") {
+    startDailyFromEntry();
+  }
+}
+
+async function createAndCopyInvite() {
+  setMatchMode("casual");
+  setOpponentMode("multi");
+  updateInviteLink();
+  trackEvent("postgame_invite", { room: roomCode });
+  try {
+    await navigator.clipboard.writeText(inviteUrl());
+  } catch {
+    // The invite panel still exposes the link when clipboard access is unavailable.
+  }
+}
+
+function trackRetry() {
+  trackEvent("retry", {
+    previousWinner: state.winner,
+    previousScore: `${state.awayScore}-${state.homeScore}`,
+    previousPitches: state.stats.total,
+  });
+}
 
 ui.nextButton.addEventListener("click", nextPitch);
 ui.resetButton.addEventListener("click", resetGame);
@@ -1676,11 +1740,7 @@ if (ui.copyInviteButton) {
 }
 if (ui.retryButton) {
   ui.retryButton.addEventListener("click", () => {
-    trackEvent("retry", {
-      previousWinner: state.winner,
-      previousScore: `${state.awayScore}-${state.homeScore}`,
-      previousPitches: state.stats.total,
-    });
+    trackRetry();
     resetGame();
   });
 }
@@ -1690,9 +1750,14 @@ if (ui.shareResultButton) {
 
 window.addEventListener("keydown", (event) => {
   const map = { q: "zone", w: "chase", e: "inside", r: "offspeed" };
+  const endMap = { q: "retry", w: "share", e: "invite", r: "daily" };
   const key = map[event.key.toLowerCase()];
   if (key) {
     event.preventDefault();
+    if (state.gameOver) {
+      handlePostGameAction(endMap[event.key.toLowerCase()]);
+      return;
+    }
     chooseKey(key);
   }
   if (event.code === "Space" || event.key === "Enter") {
