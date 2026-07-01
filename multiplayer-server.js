@@ -347,7 +347,7 @@ function handleShareCard(req, res, url) {
     "Content-Type": "image/svg+xml; charset=utf-8",
     "Cache-Control": "public, max-age=300",
   });
-  res.end(card);
+  res.end(req.method === "HEAD" ? "" : card);
 }
 
 function validMode(value) {
@@ -392,14 +392,14 @@ function serveStatic(req, res, url) {
         "Content-Type": contentType(filePath),
         "Cache-Control": "no-store",
       });
-      res.end(applyShareMeta(data.toString("utf8"), req, url));
+      res.end(req.method === "HEAD" ? "" : applyShareMeta(data.toString("utf8"), req, url));
       return;
     }
     res.writeHead(200, {
       "Content-Type": contentType(filePath),
       "Cache-Control": "no-store",
     });
-    res.end(data);
+    res.end(req.method === "HEAD" ? "" : data);
   });
 }
 
@@ -762,13 +762,13 @@ function escapeHtml(value) {
 function writeCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
 }
 
-function writeJson(res, status, payload) {
+function writeJson(res, status, payload, headOnly = false) {
   writeCors(res);
   res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload));
+  res.end(headOnly ? "" : JSON.stringify(payload));
 }
 
 const server = http.createServer((req, res) => {
@@ -780,18 +780,19 @@ const server = http.createServer((req, res) => {
   }
 
   const url = new URL(req.url, `http://${req.headers.host || "127.0.0.1"}`);
-  if (req.method === "GET" && url.pathname === "/health") {
+  const isRead = req.method === "GET" || req.method === "HEAD";
+  if (isRead && url.pathname === "/health") {
     writeJson(res, 200, {
       ok: true,
       rooms: rooms.size,
       activeClients: roomSummaries().reduce((sum, room) => sum + room.clients, 0),
       roomTtlMs: ROOM_TTL_MS,
       revealMs: REVEAL_MS,
-    });
+    }, req.method === "HEAD");
     return;
   }
-  if (req.method === "GET" && url.pathname === "/rooms") {
-    writeJson(res, 200, { rooms: roomSummaries() });
+  if (isRead && url.pathname === "/rooms") {
+    writeJson(res, 200, { rooms: roomSummaries() }, req.method === "HEAD");
     return;
   }
   if (req.method === "GET" && url.pathname === "/profile") {
@@ -806,7 +807,7 @@ const server = http.createServer((req, res) => {
     writeJson(res, 200, trafficSummary());
     return;
   }
-  if (req.method === "GET" && url.pathname === "/share-card.svg") {
+  if (isRead && url.pathname === "/share-card.svg") {
     handleShareCard(req, res, url);
     return;
   }
@@ -822,7 +823,7 @@ const server = http.createServer((req, res) => {
     handleAction(req, res, url);
     return;
   }
-  if (req.method === "GET") {
+  if (isRead) {
     serveStatic(req, res, url);
     return;
   }
