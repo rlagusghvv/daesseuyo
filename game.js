@@ -88,12 +88,14 @@ const ui = {
   rankRecord: document.querySelector("#rankRecord"),
   entryOverlay: document.querySelector("#entryOverlay"),
   startAiButton: document.querySelector("#startAiButton"),
+  startDailyButton: document.querySelector("#startDailyButton"),
   startRankButton: document.querySelector("#startRankButton"),
   startMultiButton: document.querySelector("#startMultiButton"),
   hideEntryButton: document.querySelector("#hideEntryButton"),
   invitePanel: document.querySelector("#invitePanel"),
   inviteLink: document.querySelector("#inviteLink"),
   copyInviteButton: document.querySelector("#copyInviteButton"),
+  shareResultButton: document.querySelector("#shareResultButton"),
 };
 
 const classes = {
@@ -184,6 +186,7 @@ let autoAdvanceTimer = 0;
 let countdownTimer = 0;
 let motionVideoRequest = 0;
 let serverProfileLoaded = false;
+let trackedResultKey = "";
 
 function getDeviceId() {
   const existing = localStorage.getItem("daesseuyo-device-id");
@@ -324,6 +327,7 @@ function generateRoomCode() {
 function inviteUrl() {
   const url = new URL(window.location.href);
   url.searchParams.set("duel", roomCode || generateRoomCode());
+  url.searchParams.set("ref", "invite");
   return url.href;
 }
 
@@ -358,6 +362,21 @@ function startAiFromEntry(mode = "casual") {
   setMatchMode(mode);
   setOpponentMode("ai");
   hideEntryOverlay();
+  trackEvent(mode === "ranked" ? "start_ai_ranked" : "start_ai");
+}
+
+function startDailyFromEntry() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("daily", todayKey());
+  url.searchParams.set("ref", "daily");
+  window.history.replaceState({}, "", url);
+  profile.onboarded = true;
+  profile.aiLevel = "hard";
+  saveRankProfile();
+  setMatchMode("ranked");
+  setOpponentMode("ai");
+  hideEntryOverlay();
+  trackEvent("start_daily", { daily: todayKey(), aiLevel: profile.aiLevel });
 }
 
 function startMultiFromEntry() {
@@ -368,6 +387,7 @@ function startMultiFromEntry() {
   updateInviteLink();
   if (ui.startMultiButton) ui.startMultiButton.textContent = "방 생성됨";
   if (ui.hideEntryButton) ui.hideEntryButton.textContent = "게임 보기";
+  trackEvent("create_invite", { room: roomCode });
 }
 
 function setAiLevel(level) {
@@ -564,6 +584,7 @@ function canChoose() {
 
 function render() {
   applyRankResult();
+  trackCompletedGame();
   renderStatus();
   renderRoleState();
   renderPlay();
@@ -1366,6 +1387,12 @@ function renderRank() {
   ui.aiLabel.textContent = session.matchMode === "ranked"
     ? `AI 랭크 · ${aiLevels[profile.aiLevel].label}`
     : `AI ${aiLevels[profile.aiLevel].label}`;
+  if (ui.shareResultButton) {
+    ui.shareResultButton.className = state.gameOver
+      ? "rounded-md bg-primary px-2 py-2 text-xs font-semibold text-primary-foreground"
+      : "hidden";
+    ui.shareResultButton.textContent = "공유";
+  }
 }
 
 function tierName(rating) {
@@ -1381,6 +1408,110 @@ function rankResultText() {
   const won = state.winner === side;
   const delta = profile.lastDelta === 0 ? "" : ` ${profile.lastDelta > 0 ? "+" : ""}${profile.lastDelta}`;
   return `${won ? "랭크 승리" : "랭크 패배"}${delta}`;
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10).replaceAll("-", "");
+}
+
+function sourceRef() {
+  const current = new URLSearchParams(window.location.search);
+  return current.get("ref") || current.get("utm_source") || "";
+}
+
+function resultShareUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("duel");
+  url.searchParams.set("play", "1");
+  url.searchParams.set("ref", "result");
+  return url.href;
+}
+
+function resultShareText() {
+  const role = session.online && session.role === "pitcher" ? "투수" : "타자";
+  const won = state.winner === "batter"
+    ? role !== "투수"
+    : role === "투수";
+  const readRate = state.stats.total ? Math.round((state.stats.reads / state.stats.total) * 100) : 0;
+  const title = won ? "9회말 승부 이겼다" : "9회말 승부 졌다";
+  return `${title}. ${state.awayScore}-${state.homeScore}, ${state.stats.total}구, 읽기 ${readRate}%. 대쓰요에서 한 판 붙자.`;
+}
+
+async function shareResult() {
+  const text = resultShareText();
+  const url = resultShareUrl();
+  const payload = {
+    title: "대쓰요: real BaseBall",
+    text,
+    url,
+  };
+  try {
+    if (navigator.share) {
+      await navigator.share(payload);
+    } else {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+    }
+    trackEvent("share_result", {
+      winner: state.winner,
+      score: `${state.awayScore}-${state.homeScore}`,
+      pitches: state.stats.total,
+    });
+    if (ui.shareResultButton) {
+      ui.shareResultButton.textContent = "완료";
+      window.setTimeout(() => {
+        if (ui.shareResultButton) ui.shareResultButton.textContent = "공유";
+      }, 1200);
+    }
+  } catch {
+    if (ui.shareResultButton) ui.shareResultButton.textContent = "실패";
+  }
+}
+
+function trackCompletedGame() {
+  if (!state.gameOver || !state.winner) return;
+  const key = `${session.opponent}:${session.matchMode}:${session.room || "local"}:${state.stats.total}:${state.awayScore}-${state.homeScore}:${state.winner}`;
+  if (trackedResultKey === key) return;
+  trackedResultKey = key;
+  const readRate = state.stats.total ? Math.round((state.stats.reads / state.stats.total) * 100) : 0;
+  trackEvent("game_over", {
+    winner: state.winner,
+    score: `${state.awayScore}-${state.homeScore}`,
+    pitches: state.stats.total,
+    readRate,
+    result: state.result?.kind || "",
+  });
+}
+
+function trackEvent(eventName, extra = {}) {
+  if (window.location.protocol === "file:") return;
+  const payload = {
+    event: eventName,
+    deviceId,
+    ref: sourceRef(),
+    path: window.location.pathname,
+    room: roomCode ? "1" : "",
+    mode: session.matchMode,
+    opponent: session.opponent,
+    ts: Date.now(),
+    ...extra,
+  };
+  const body = JSON.stringify(payload);
+  const url = `${multiplayerOrigin()}/metrics`;
+  try {
+    if (navigator.sendBeacon) {
+      const blob = new Blob([body], { type: "application/json" });
+      navigator.sendBeacon(url, blob);
+      return;
+    }
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // Traffic metrics are best-effort and should never affect play.
+  }
 }
 
 function renderCountBars(counts) {
@@ -1427,6 +1558,9 @@ ui.aiButtons.forEach((button) => {
 if (ui.startAiButton) {
   ui.startAiButton.addEventListener("click", () => startAiFromEntry("casual"));
 }
+if (ui.startDailyButton) {
+  ui.startDailyButton.addEventListener("click", startDailyFromEntry);
+}
 if (ui.startRankButton) {
   ui.startRankButton.addEventListener("click", () => startAiFromEntry("ranked"));
 }
@@ -1441,6 +1575,7 @@ if (ui.copyInviteButton) {
     updateInviteLink();
     try {
       await navigator.clipboard.writeText(ui.inviteLink.value);
+      trackEvent("copy_invite", { room: roomCode });
       ui.copyInviteButton.textContent = "완료";
       window.setTimeout(() => {
         ui.copyInviteButton.textContent = "복사";
@@ -1449,6 +1584,9 @@ if (ui.copyInviteButton) {
       ui.inviteLink.select();
     }
   });
+}
+if (ui.shareResultButton) {
+  ui.shareResultButton.addEventListener("click", shareResult);
 }
 
 window.addEventListener("keydown", (event) => {
@@ -1467,4 +1605,7 @@ window.addEventListener("keydown", (event) => {
 showEntryOverlayIfNeeded();
 syncServerProfile();
 render();
+trackEvent("view", {
+  entry: roomCode ? "duel" : params.get("daily") ? "daily" : "home",
+});
 if (session.opponent === "multi") connectOnline();

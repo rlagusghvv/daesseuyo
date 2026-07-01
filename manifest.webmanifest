@@ -1,0 +1,29 @@
+{
+  "name": "대쓰요: real BaseBall",
+  "short_name": "대쓰요",
+  "description": "9회말 2아웃, 네 키로 끝내는 야구 심리전.",
+  "start_url": "/?play=1&ref=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "lang": "ko",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/assets/daesseuyo-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/Content/Daesseuyo/Generated/Images/stadium_batting_view.png",
+      "sizes": "1536x1024",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "대쓰요 야구 심리전 플레이 화면"
+    }
+  ]
+}

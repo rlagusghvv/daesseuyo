@@ -79,6 +79,16 @@ node scripts/simulate_balance.js --games 10000
 scripts/check_web_mvp_ready.sh
 ```
 
+트래픽/홍보 체크:
+
+```bash
+curl -fsS https://daesseuyo.splui.com/traffic
+```
+
+성장 방향:
+
+- [Growth Plan](docs/GROWTH_PLAN.md)
+
 맥미니 상시 실행:
 
 - [Mac Mini Deploy](docs/MAC_MINI_DEPLOY.md)

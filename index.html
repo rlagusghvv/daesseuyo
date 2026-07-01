@@ -3,6 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="9회말 2아웃 동점 상황에서 Q/W/E/R 네 키로 투수와 타자의 심리전을 겨루는 한국 야구 웹 게임." />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://daesseuyo.splui.com/" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="대쓰요: real BaseBall" />
+    <meta property="og:title" content="대쓰요: real BaseBall" />
+    <meta property="og:description" content="9회말 2아웃. 투수는 숨기고, 타자는 읽는다. 네 키로 끝내는 야구 심리전." />
+    <meta property="og:url" content="https://daesseuyo.splui.com/" />
+    <meta property="og:image" content="https://daesseuyo.splui.com/Content/Daesseuyo/Generated/Images/stadium_batting_view.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="대쓰요: real BaseBall" />
+    <meta name="twitter:description" content="9회말 2아웃. 네 키로 끝내는 야구 심리전." />
+    <meta name="twitter:image" content="https://daesseuyo.splui.com/Content/Daesseuyo/Generated/Images/stadium_batting_view.png" />
     <title>대쓰요: real BaseBall</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -26,6 +41,18 @@
           }
         }
       };
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "VideoGame",
+        "name": "대쓰요: real BaseBall",
+        "url": "https://daesseuyo.splui.com/",
+        "applicationCategory": "Game",
+        "operatingSystem": "Web",
+        "genre": ["Sports", "Strategy", "Baseball"],
+        "description": "9회말 2아웃 동점 상황에서 Q/W/E/R 네 키로 투수와 타자의 심리전을 겨루는 한국 야구 웹 게임."
+      }
     </script>
   </head>
   <body class="h-screen overflow-hidden bg-background text-sm text-foreground">
@@ -242,7 +269,10 @@
           <section class="min-w-0 overflow-hidden rounded-md border border-border bg-card p-2">
             <div class="flex min-w-0 items-center justify-between gap-2">
               <span class="truncate text-xs text-muted-foreground">최근 승부</span>
-              <strong id="duelCount" class="text-sm">0</strong>
+              <div class="flex shrink-0 items-center gap-2">
+                <strong id="duelCount" class="text-sm">0</strong>
+                <button id="shareResultButton" class="hidden rounded-md bg-muted px-2 py-2 text-xs font-semibold text-foreground" type="button">공유</button>
+              </div>
             </div>
             <div class="mt-2 hidden grid-cols-3 gap-2 md:grid" aria-label="랭크 전적">
               <div class="rounded-md bg-background p-2">
@@ -272,11 +302,12 @@
       <div class="grid w-full max-w-xl gap-4 rounded-md border border-border bg-card p-4">
         <div class="grid gap-2">
           <span class="text-xs font-semibold text-muted-foreground">대쓰요: real BaseBall</span>
-          <h1 class="text-2xl font-semibold leading-none">9회말 2아웃, 한 수 싸움</h1>
-          <p class="text-sm text-muted-foreground">투수는 공을 숨기고, 타자는 읽는다. Q/W/E/R 중 하나만 고르면 바로 승부가 난다.</p>
+          <h1 class="text-2xl font-semibold leading-none">9회말 2아웃, 네 키 심리전</h1>
+          <p class="text-sm text-muted-foreground">공 하나마다 투수는 숨기고, 타자는 읽는다. 1분 안에 승부가 난다.</p>
         </div>
-        <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <button id="startAiButton" class="rounded-md bg-primary p-4 text-sm font-semibold text-primary-foreground" type="button">AI 대전</button>
+          <button id="startDailyButton" class="rounded-md bg-muted p-4 text-sm font-semibold text-foreground" type="button">오늘의 승부</button>
           <button id="startRankButton" class="rounded-md bg-muted p-4 text-sm font-semibold text-foreground" type="button">랭크 테스트</button>
           <button id="startMultiButton" class="rounded-md bg-muted p-4 text-sm font-semibold text-foreground" type="button">친구랑 하기</button>
         </div>
@@ -286,9 +317,9 @@
             <button id="hideEntryButton" class="rounded-md bg-muted px-4 py-2 text-xs text-foreground" type="button">바로 보기</button>
           </div>
           <div id="tutorialPanel" class="grid gap-2 text-sm text-muted-foreground">
-            <p>타자: 들어올 공을 고른다. W는 치지 않고 골라내기.</p>
-            <p>투수: 타자가 못 맞힐 공을 고른다. 좋은 공도 실투가 날 수 있다.</p>
-            <p>맞히면 좋은 타구 확률이 오르고, 빗나가면 투수가 유리하다.</p>
+            <p>타자: 들어올 공을 읽는다. W는 치지 않고 골라내기.</p>
+            <p>투수: 타자가 못 읽을 공을 고른다. 좋은 선택도 실투가 날 수 있다.</p>
+            <p>맞히면 강한 타구 확률이 오르고, 빗나가면 카운트가 몰린다.</p>
           </div>
         </div>
         <div id="invitePanel" class="hidden rounded-md bg-background p-4">
@@ -301,7 +332,7 @@
       </div>
     </section>
 
-    <script src="./shared-engine.js?v=design-system-27"></script>
-    <script src="./game.js?v=design-system-27"></script>
+    <script src="./shared-engine.js?v=growth-1"></script>
+    <script src="./game.js?v=growth-1"></script>
   </body>
 </html>

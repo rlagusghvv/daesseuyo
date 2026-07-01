@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="대쓰요">
+  <rect width="512" height="512" rx="96" fill="#09090b"/>
+  <path d="M96 348h320" stroke="#e4e4e7" stroke-width="28" stroke-linecap="round"/>
+  <path d="M178 348c18-54 50-82 78-82s60 28 78 82" fill="none" stroke="#e4e4e7" stroke-width="24" stroke-linecap="round"/>
+  <rect x="160" y="120" width="192" height="144" rx="18" fill="none" stroke="#e4e4e7" stroke-width="20"/>
+  <path d="M224 120v144M288 120v144M160 168h192M160 216h192" stroke="#27272a" stroke-width="12"/>
+  <circle cx="256" cy="192" r="26" fill="#e4e4e7"/>
+  <path d="M132 404h248" stroke="#71717a" stroke-width="14" stroke-linecap="round"/>
+</svg>

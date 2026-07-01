@@ -3,6 +3,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { URL } = require("url");
 const engine = require("./shared-engine.js");
 
@@ -11,6 +12,7 @@ const port = Number(process.env.PORT || 4174);
 const bindHost = process.env.BIND_HOST || process.env.HOST || "127.0.0.1";
 const dataDir = path.join(rootDir, ".data");
 const recordsFile = path.join(dataDir, "rank-records.json");
+const metricsFile = path.join(dataDir, "traffic-events.jsonl");
 const rooms = new Map();
 const MULTI_PICK_MS = 7000;
 const REVEAL_MS = 3800;
@@ -314,6 +316,12 @@ async function handleAction(req, res, url) {
   writeJson(res, 404, { error: "not found" });
 }
 
+async function handleMetrics(req, res) {
+  const body = await readBody(req);
+  const result = saveMetric(body);
+  writeJson(res, result.ok ? 200 : 400, result);
+}
+
 function handleProfile(req, res, url) {
   const deviceId = sanitizeDevice(url.searchParams.get("device"));
   if (!deviceId) {
@@ -411,6 +419,86 @@ function saveRecords() {
   fs.writeFileSync(recordsFile, JSON.stringify(records, null, 2));
 }
 
+function saveMetric(body) {
+  const event = sanitizeToken(body.event, 40);
+  if (!event) return { ok: false, error: "missing event" };
+
+  const row = {
+    at: Date.now(),
+    event,
+    device: hashDevice(sanitizeDevice(body.deviceId)),
+    ref: sanitizeToken(body.ref, 60),
+    path: sanitizePath(body.path),
+    room: body.room ? "1" : "",
+    mode: validMode(body.mode) || sanitizeToken(body.mode, 20),
+    opponent: sanitizeToken(body.opponent, 20),
+    winner: sanitizeToken(body.winner, 20),
+    score: sanitizeToken(body.score, 20),
+    pitches: clampNumber(body.pitches, 0, 99, 0),
+    readRate: clampNumber(body.readRate, 0, 100, 0),
+    result: sanitizeToken(body.result, 30),
+  };
+
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.appendFileSync(metricsFile, `${JSON.stringify(row)}\n`);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: "metric write failed" };
+  }
+}
+
+function trafficSummary() {
+  const rows = readMetricRows();
+  const now = Date.now();
+  return {
+    ok: true,
+    totalEvents: rows.length,
+    last24h: summarizeMetricRows(rows.filter((row) => now - row.at <= 24 * 60 * 60 * 1000)),
+    last7d: summarizeMetricRows(rows.filter((row) => now - row.at <= 7 * 24 * 60 * 60 * 1000)),
+  };
+}
+
+function readMetricRows() {
+  try {
+    const lines = fs.readFileSync(metricsFile, "utf8").trim().split("\n").filter(Boolean);
+    return lines.slice(-5000).map((line) => JSON.parse(line)).filter((row) => Number.isFinite(row.at));
+  } catch {
+    return [];
+  }
+}
+
+function summarizeMetricRows(rows) {
+  const byEvent = {};
+  const byRef = {};
+  const devices = new Set();
+  for (const row of rows) {
+    byEvent[row.event] = (byEvent[row.event] || 0) + 1;
+    byRef[row.ref || "direct"] = (byRef[row.ref || "direct"] || 0) + 1;
+    if (row.device) devices.add(row.device);
+  }
+  return {
+    events: rows.length,
+    uniqueDevices: devices.size,
+    byEvent,
+    byRef,
+  };
+}
+
+function sanitizeToken(value, maxLength) {
+  return String(value || "").replace(/[^a-zA-Z0-9가-힣_.:-]/g, "").slice(0, maxLength);
+}
+
+function sanitizePath(value) {
+  const pathValue = String(value || "/").replace(/[^a-zA-Z0-9/_-]/g, "").slice(0, 120);
+  return pathValue || "/";
+}
+
+function hashDevice(deviceId) {
+  if (!deviceId) return "";
+  return crypto.createHash("sha256").update(deviceId).digest("hex").slice(0, 24);
+}
+
 function sanitizeDevice(value) {
   return String(value || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
 }
@@ -495,6 +583,10 @@ function clampNumber(value, min, max, fallback) {
 function contentType(filePath) {
   if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
   if (filePath.endsWith(".js")) return "text/javascript; charset=utf-8";
+  if (filePath.endsWith(".webmanifest")) return "application/manifest+json; charset=utf-8";
+  if (filePath.endsWith(".xml")) return "application/xml; charset=utf-8";
+  if (filePath.endsWith(".txt")) return "text/plain; charset=utf-8";
+  if (filePath.endsWith(".svg")) return "image/svg+xml";
   if (filePath.endsWith(".png")) return "image/png";
   if (filePath.endsWith(".mp4")) return "video/mp4";
   if (filePath.endsWith(".webm")) return "video/webm";
@@ -540,8 +632,16 @@ const server = http.createServer((req, res) => {
     handleProfile(req, res, url);
     return;
   }
+  if (req.method === "GET" && url.pathname === "/traffic") {
+    writeJson(res, 200, trafficSummary());
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/events") {
     handleEvents(req, res, url);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/metrics") {
+    handleMetrics(req, res);
     return;
   }
   if (req.method === "POST" && ["/choose", "/next", "/reset", "/mode", "/record"].includes(url.pathname)) {
