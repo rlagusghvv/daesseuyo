@@ -247,6 +247,11 @@ async function handleAction(req, res, url) {
     writeJson(res, result.ok ? 200 : 400, result);
     return;
   }
+  if (url.pathname === "/daily") {
+    const result = saveDailyResult(body);
+    writeJson(res, result.ok ? 200 : 400, result);
+    return;
+  }
 
   const clientId = sanitizeClient(body.clientId);
   if (!clientId) {
@@ -331,6 +336,20 @@ function handleProfile(req, res, url) {
   writeJson(res, 200, { ok: true, profile: getRecordProfile(deviceId) });
 }
 
+function handleDaily(req, res, url) {
+  const date = sanitizeDailyKey(url.searchParams.get("date") || todayKey());
+  writeJson(res, 200, { ok: true, date, board: dailyBoard(date) });
+}
+
+function handleShareCard(req, res, url) {
+  const card = shareCard(url);
+  res.writeHead(200, {
+    "Content-Type": "image/svg+xml; charset=utf-8",
+    "Cache-Control": "public, max-age=300",
+  });
+  res.end(card);
+}
+
 function validMode(value) {
   if (value === "ranked") return "ranked";
   if (value === "casual") return "casual";
@@ -366,6 +385,14 @@ function serveStatic(req, res, url) {
     if (error) {
       res.writeHead(404);
       res.end("Not found");
+      return;
+    }
+    if (filePath.endsWith("index.html") && hasShareMeta(url)) {
+      res.writeHead(200, {
+        "Content-Type": contentType(filePath),
+        "Cache-Control": "no-store",
+      });
+      res.end(applyShareMeta(data.toString("utf8"), req, url));
       return;
     }
     res.writeHead(200, {
@@ -408,9 +435,12 @@ function roomSummaries() {
 
 function loadRecords() {
   try {
-    return JSON.parse(fs.readFileSync(recordsFile, "utf8"));
+    const saved = JSON.parse(fs.readFileSync(recordsFile, "utf8"));
+    if (!saved.clients) saved.clients = {};
+    if (!saved.daily) saved.daily = {};
+    return saved;
   } catch {
-    return { clients: {} };
+    return { clients: {}, daily: {} };
   }
 }
 
@@ -529,6 +559,80 @@ function getRecordProfile(deviceId) {
   };
 }
 
+function todayKey() {
+  return new Date().toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function sanitizeDailyKey(value) {
+  const safe = String(value || "").replace(/[^0-9]/g, "").slice(0, 8);
+  return safe.length === 8 ? safe : todayKey();
+}
+
+function dailyBoard(date) {
+  if (!records.daily) records.daily = {};
+  const board = records.daily[date] || { entries: [] };
+  return {
+    entries: board.entries.slice(0, 20),
+    updatedAt: board.updatedAt || 0,
+  };
+}
+
+function saveDailyResult(body) {
+  if (!records.daily) records.daily = {};
+  const date = sanitizeDailyKey(body.daily || body.date);
+  const deviceId = sanitizeDevice(body.deviceId);
+  const resultKey = String(body.resultKey || "").slice(0, 160);
+  if (!deviceId || !resultKey) return { ok: false, error: "invalid daily result" };
+
+  const board = records.daily[date] || { entries: [], resultKeys: [], updatedAt: 0 };
+  if (!Array.isArray(board.entries)) board.entries = [];
+  if (!Array.isArray(board.resultKeys)) board.resultKeys = [];
+  if (board.resultKeys.includes(resultKey)) return { ok: true, duplicate: true, date, board: dailyBoard(date) };
+
+  const won = Boolean(body.won);
+  const pitches = clampNumber(body.pitches, 0, 99, 0);
+  const readRate = clampNumber(body.readRate, 0, 100, 0);
+  const score = dailyScore({ won, pitches, readRate, winner: body.winner });
+  const entry = {
+    id: hashDevice(deviceId),
+    name: dailyName(deviceId),
+    at: Date.now(),
+    won,
+    score,
+    gameScore: String(body.score || "").slice(0, 20),
+    pitches,
+    readRate,
+    outcome: sanitizeToken(body.outcome || body.result, 30),
+  };
+
+  board.resultKeys.unshift(resultKey);
+  board.resultKeys = board.resultKeys.slice(0, 300);
+  const existingIndex = board.entries.findIndex((item) => item.id === entry.id);
+  if (existingIndex >= 0) {
+    if (entry.score >= board.entries[existingIndex].score) board.entries[existingIndex] = entry;
+  } else {
+    board.entries.push(entry);
+  }
+  board.entries.sort((a, b) => b.score - a.score || a.pitches - b.pitches || b.readRate - a.readRate || a.at - b.at);
+  board.entries = board.entries.slice(0, 100);
+  board.updatedAt = Date.now();
+  records.daily[date] = board;
+  saveRecords();
+  return { ok: true, date, board: dailyBoard(date), entry };
+}
+
+function dailyScore({ won, pitches, readRate }) {
+  const finish = won ? 10000 : 2500;
+  const pace = Math.max(0, 40 - pitches) * 90;
+  const read = readRate * 18;
+  return Math.max(0, Math.round(finish + pace + read));
+}
+
+function dailyName(deviceId) {
+  const digest = hashDevice(deviceId).slice(0, 4).toUpperCase();
+  return `D-${digest}`;
+}
+
 function saveRecord(body) {
   const deviceId = sanitizeDevice(body.deviceId);
   const resultKey = String(body.resultKey || "").slice(0, 160);
@@ -593,6 +697,68 @@ function contentType(filePath) {
   return "application/octet-stream";
 }
 
+function hasShareMeta(url) {
+  return url.searchParams.has("share") || url.searchParams.has("score") || url.searchParams.has("pitches");
+}
+
+function publicBaseUrl(req) {
+  const host = req.headers["x-forwarded-host"] || req.headers.host || "daesseuyo.splui.com";
+  const proto = req.headers["x-forwarded-proto"] || (String(host).includes("127.0.0.1") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+function applyShareMeta(html, req, url) {
+  const meta = resultMeta(url, publicBaseUrl(req));
+  return html
+    .replace(/<meta property="og:title" content="[^"]*" \/>/, `<meta property="og:title" content="${escapeHtml(meta.title)}" />`)
+    .replace(/<meta property="og:description" content="[^"]*" \/>/, `<meta property="og:description" content="${escapeHtml(meta.description)}" />`)
+    .replace(/<meta property="og:image" content="[^"]*" \/>/, `<meta property="og:image" content="${escapeHtml(meta.image)}" />`)
+    .replace(/<meta name="twitter:title" content="[^"]*" \/>/, `<meta name="twitter:title" content="${escapeHtml(meta.title)}" />`)
+    .replace(/<meta name="twitter:description" content="[^"]*" \/>/, `<meta name="twitter:description" content="${escapeHtml(meta.description)}" />`)
+    .replace(/<meta name="twitter:image" content="[^"]*" \/>/, `<meta name="twitter:image" content="${escapeHtml(meta.image)}" />`);
+}
+
+function resultMeta(url, baseUrl) {
+  const score = sanitizeToken(url.searchParams.get("score"), 20) || "9회말";
+  const pitches = clampNumber(url.searchParams.get("pitches"), 0, 99, 0);
+  const read = clampNumber(url.searchParams.get("read"), 0, 100, 0);
+  const result = sanitizeToken(url.searchParams.get("result"), 20);
+  const title = result === "win" ? "대쓰요 끝내기 성공" : result === "loss" ? "대쓰요 수비 승리" : "대쓰요 결과";
+  const description = `${score}, ${pitches}구, 읽기 ${read}%. 9회말 2아웃 야구 심리전.`;
+  const image = `${baseUrl}/share-card.svg?score=${encodeURIComponent(score)}&pitches=${pitches}&read=${read}&result=${encodeURIComponent(result)}`;
+  return { title, description, image };
+}
+
+function shareCard(url) {
+  const score = escapeHtml(sanitizeToken(url.searchParams.get("score"), 20) || "3-3");
+  const pitches = clampNumber(url.searchParams.get("pitches"), 0, 99, 0);
+  const read = clampNumber(url.searchParams.get("read"), 0, 100, 0);
+  const result = sanitizeToken(url.searchParams.get("result"), 20);
+  const main = result === "win" ? "끝내기 성공" : result === "loss" ? "수비 승리" : "9회말 승부";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#09090b"/>
+  <rect x="56" y="56" width="1088" height="518" rx="32" fill="#18181b" stroke="#27272a" stroke-width="4"/>
+  <text x="96" y="142" fill="#a1a1aa" font-family="Arial, sans-serif" font-size="34" font-weight="700">대쓰요: real BaseBall</text>
+  <text x="96" y="262" fill="#fafafa" font-family="Arial, sans-serif" font-size="86" font-weight="800">${main}</text>
+  <text x="96" y="354" fill="#e4e4e7" font-family="Arial, sans-serif" font-size="54" font-weight="700">${score} · ${pitches}구 · 읽기 ${read}%</text>
+  <g transform="translate(850 170)">
+    <rect x="0" y="0" width="210" height="270" rx="20" fill="#09090b" stroke="#e4e4e7" stroke-width="12"/>
+    <path d="M70 0v270M140 0v270M0 90h210M0 180h210" stroke="#27272a" stroke-width="6"/>
+    <circle cx="105" cy="135" r="28" fill="#e4e4e7"/>
+    <path d="M30 326h280" stroke="#e4e4e7" stroke-width="18" stroke-linecap="round"/>
+  </g>
+  <text x="96" y="498" fill="#a1a1aa" font-family="Arial, sans-serif" font-size="32" font-weight="700">9회말 2아웃, 네 키로 끝내는 야구 심리전</text>
+</svg>`;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 function writeCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -632,8 +798,16 @@ const server = http.createServer((req, res) => {
     handleProfile(req, res, url);
     return;
   }
+  if (req.method === "GET" && url.pathname === "/daily") {
+    handleDaily(req, res, url);
+    return;
+  }
   if (req.method === "GET" && url.pathname === "/traffic") {
     writeJson(res, 200, trafficSummary());
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/share-card.svg") {
+    handleShareCard(req, res, url);
     return;
   }
   if (req.method === "GET" && url.pathname === "/events") {
@@ -644,7 +818,7 @@ const server = http.createServer((req, res) => {
     handleMetrics(req, res);
     return;
   }
-  if (req.method === "POST" && ["/choose", "/next", "/reset", "/mode", "/record"].includes(url.pathname)) {
+  if (req.method === "POST" && ["/choose", "/next", "/reset", "/mode", "/record", "/daily"].includes(url.pathname)) {
     handleAction(req, res, url);
     return;
   }

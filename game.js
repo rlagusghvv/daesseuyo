@@ -86,6 +86,7 @@ const ui = {
   rankRating: document.querySelector("#rankRating"),
   rankDelta: document.querySelector("#rankDelta"),
   rankRecord: document.querySelector("#rankRecord"),
+  dailySummary: document.querySelector("#dailySummary"),
   entryOverlay: document.querySelector("#entryOverlay"),
   startAiButton: document.querySelector("#startAiButton"),
   startDailyButton: document.querySelector("#startDailyButton"),
@@ -95,6 +96,7 @@ const ui = {
   invitePanel: document.querySelector("#invitePanel"),
   inviteLink: document.querySelector("#inviteLink"),
   copyInviteButton: document.querySelector("#copyInviteButton"),
+  retryButton: document.querySelector("#retryButton"),
   shareResultButton: document.querySelector("#shareResultButton"),
 };
 
@@ -187,6 +189,8 @@ let countdownTimer = 0;
 let motionVideoRequest = 0;
 let serverProfileLoaded = false;
 let trackedResultKey = "";
+let dailyResultKey = "";
+let dailyBoard = { entries: [], updatedAt: 0 };
 
 function getDeviceId() {
   const existing = localStorage.getItem("daesseuyo-device-id");
@@ -410,6 +414,8 @@ function nextPitch() {
 
 function resetGame() {
   clearAutoAdvance();
+  trackedResultKey = "";
+  dailyResultKey = "";
   if (session.opponent === "multi" && session.online) {
     postAction("/reset", {});
     return;
@@ -585,6 +591,7 @@ function canChoose() {
 function render() {
   applyRankResult();
   trackCompletedGame();
+  syncDailyResult();
   renderStatus();
   renderRoleState();
   renderPlay();
@@ -1373,6 +1380,7 @@ function renderRank() {
   }
   const streak = profile.streak === 0 ? "" : ` · ${Math.abs(profile.streak)}${profile.streak > 0 ? "연승" : "연패"}`;
   if (ui.rankRecord) ui.rankRecord.textContent = `${profile.wins}승 ${profile.losses}패${streak}`;
+  if (ui.dailySummary) ui.dailySummary.textContent = dailySummaryText();
   ui.opponentButtons.forEach((button) => {
     const active = button.dataset.opponent === session.opponent;
     button.className = active ? classes.smallButtonActive : classes.smallButton;
@@ -1387,12 +1395,26 @@ function renderRank() {
   ui.aiLabel.textContent = session.matchMode === "ranked"
     ? `AI 랭크 · ${aiLevels[profile.aiLevel].label}`
     : `AI ${aiLevels[profile.aiLevel].label}`;
+  if (ui.retryButton) {
+    ui.retryButton.className = state.gameOver
+      ? "rounded-md bg-muted px-2 py-2 text-xs font-semibold text-foreground"
+      : "hidden";
+  }
   if (ui.shareResultButton) {
     ui.shareResultButton.className = state.gameOver
       ? "rounded-md bg-primary px-2 py-2 text-xs font-semibold text-primary-foreground"
       : "hidden";
     ui.shareResultButton.textContent = "공유";
   }
+}
+
+function dailySummaryText() {
+  const daily = activeDailyKey();
+  if (!daily) return "오늘의 승부 대기";
+  const entries = dailyBoard.entries || [];
+  if (!entries.length) return "오늘 기록 없음";
+  const leader = entries[0];
+  return `오늘 1위 ${leader.score}점 · ${leader.pitches}구`;
 }
 
 function tierName(rating) {
@@ -1421,20 +1443,31 @@ function sourceRef() {
 
 function resultShareUrl() {
   const url = new URL(window.location.href);
+  const readRate = state.stats.total ? Math.round((state.stats.reads / state.stats.total) * 100) : 0;
   url.searchParams.delete("duel");
   url.searchParams.set("play", "1");
   url.searchParams.set("ref", "result");
+  url.searchParams.set("share", "1");
+  url.searchParams.set("score", `${state.awayScore}-${state.homeScore}`);
+  url.searchParams.set("pitches", `${state.stats.total}`);
+  url.searchParams.set("read", `${readRate}`);
+  url.searchParams.set("result", resultWon() ? "win" : "loss");
+  const daily = activeDailyKey();
+  if (daily) url.searchParams.set("daily", daily);
   return url.href;
 }
 
 function resultShareText() {
-  const role = session.online && session.role === "pitcher" ? "투수" : "타자";
-  const won = state.winner === "batter"
-    ? role !== "투수"
-    : role === "투수";
+  const won = resultWon();
   const readRate = state.stats.total ? Math.round((state.stats.reads / state.stats.total) * 100) : 0;
   const title = won ? "9회말 승부 이겼다" : "9회말 승부 졌다";
-  return `${title}. ${state.awayScore}-${state.homeScore}, ${state.stats.total}구, 읽기 ${readRate}%. 대쓰요에서 한 판 붙자.`;
+  const daily = activeDailyKey() ? " 오늘의 승부 기록판도 열림." : "";
+  return `${title}. ${state.awayScore}-${state.homeScore}, ${state.stats.total}구, 읽기 ${readRate}%.${daily} 대쓰요에서 한 판 붙자.`;
+}
+
+function resultWon() {
+  const role = session.online && session.role === "pitcher" ? "투수" : "타자";
+  return state.winner === "batter" ? role !== "투수" : role === "투수";
 }
 
 async function shareResult() {
@@ -1480,6 +1513,62 @@ function trackCompletedGame() {
     readRate,
     result: state.result?.kind || "",
   });
+}
+
+function activeDailyKey() {
+  const current = new URLSearchParams(window.location.search);
+  return current.get("daily") || "";
+}
+
+async function loadDailyBoard() {
+  if (window.location.protocol === "file:") return;
+  const daily = activeDailyKey();
+  if (!daily) return;
+  try {
+    const response = await fetch(`${multiplayerOrigin()}/daily?date=${encodeURIComponent(daily)}`);
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (!payload.board || !Array.isArray(payload.board.entries)) return;
+    dailyBoard = payload.board;
+    renderRank();
+  } catch {
+    // Daily board is optional and should not affect the game loop.
+  }
+}
+
+async function syncDailyResult() {
+  if (window.location.protocol === "file:" || !state.gameOver || !state.winner) return;
+  const daily = activeDailyKey();
+  if (!daily) return;
+  const readRate = state.stats.total ? Math.round((state.stats.reads / state.stats.total) * 100) : 0;
+  const resultKey = `${daily}:${session.opponent}:${session.room || "local"}:${state.stats.total}:${state.awayScore}-${state.homeScore}:${state.winner}:${state.result?.kind || ""}`;
+  if (dailyResultKey === resultKey) return;
+  dailyResultKey = resultKey;
+  try {
+    const response = await fetch(`${multiplayerOrigin()}/daily`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        daily,
+        deviceId,
+        resultKey,
+        won: resultWon(),
+        winner: state.winner,
+        score: `${state.awayScore}-${state.homeScore}`,
+        pitches: state.stats.total,
+        readRate,
+        outcome: state.result?.kind || "",
+      }),
+    });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (payload.board && Array.isArray(payload.board.entries)) {
+      dailyBoard = payload.board;
+      renderRank();
+    }
+  } catch {
+    dailyResultKey = "";
+  }
 }
 
 function trackEvent(eventName, extra = {}) {
@@ -1585,6 +1674,16 @@ if (ui.copyInviteButton) {
     }
   });
 }
+if (ui.retryButton) {
+  ui.retryButton.addEventListener("click", () => {
+    trackEvent("retry", {
+      previousWinner: state.winner,
+      previousScore: `${state.awayScore}-${state.homeScore}`,
+      previousPitches: state.stats.total,
+    });
+    resetGame();
+  });
+}
 if (ui.shareResultButton) {
   ui.shareResultButton.addEventListener("click", shareResult);
 }
@@ -1604,6 +1703,7 @@ window.addEventListener("keydown", (event) => {
 
 showEntryOverlayIfNeeded();
 syncServerProfile();
+loadDailyBoard();
 render();
 trackEvent("view", {
   entry: roomCode ? "duel" : params.get("daily") ? "daily" : "home",
